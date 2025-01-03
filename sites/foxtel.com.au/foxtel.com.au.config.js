@@ -1,6 +1,7 @@
 const axios = require('axios')
 const dayjs = require('dayjs')
 const cheerio = require('cheerio')
+const superagent = require('superagent')
 
 module.exports = {
   site: 'foxtel.com.au',
@@ -16,7 +17,7 @@ module.exports = {
       Cookie: 'AAMC_foxtel_0=REGION|6'
     }
   },
-  parser: function ({ content, date }) {
+  parser: async function ({ content, date }) {
     let programs = []
     const items = parseItems(content)
     for (let item of items) {
@@ -31,6 +32,7 @@ module.exports = {
         prev.stop = start
       }
       const stop = start.add(30, 'm')
+
       programs.push({
         title: parseTitle($item),
         sub_title: parseSubTitle($item),
@@ -38,6 +40,7 @@ module.exports = {
         rating: parseRating($item),
         season: parseSeason($item),
         episode: parseEpisode($item),
+        desc: await parseDescription($item),
         start,
         stop
       })
@@ -52,7 +55,7 @@ module.exports = {
           'User-Agent': 'insomnia/2022.7.5'
         }
       })
-      .then(r => r.data)
+      .then(r => r.text)
       .catch(console.log)
 
     return data.channels.map(item => {
@@ -88,7 +91,8 @@ function parseEpisode($item) {
 }
 
 function parseImage($item) {
-  return $item('.epg-event-thumbnail > img').attr('src')
+  let image = $item('.epg-event-thumbnail > img').attr('src')
+  return  image?.replace(/maxheight=\d+/g, 'maxheight=213').trim()
 }
 
 function parseTitle($item) {
@@ -134,4 +138,40 @@ function parseItems(content) {
   const $ = cheerio.load(content)
 
   return $('#epg-channel-events > a').toArray()
+}
+
+async function parseDescription($item) {
+  const href = $item('.epg-channel-event-row').attr('href')
+
+  if (href) {
+    const userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.82 Safari/537.36',
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.82 Safari/537.36',
+      'insomnia/2022.7.5'
+    ]
+    // const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)]
+
+    const endpoint = `https://www.foxtel.com.au/tv-guide/${href}`
+    // const data = await superagent
+    //     .get(endpoint)
+    //     .set('User-Agent', randomUserAgent)
+    //     // .set('User-Agent', 'insomnia/2022.7.5')
+    //     // .use(throttle.plugin(endpoint))
+    //     .then(r => r.text)
+    //     .catch(console.log)
+    //
+    const data = await axios
+        .get(endpoint, {
+          headers: {
+            'User-Agent': 'insomnia/2022.7.5'
+          }
+        })
+        .then(r => r.data)
+        .catch(console.log)
+
+    const $ = cheerio.load(data)
+    return $('#epg-short-synopsis').text()
+  } else {
+    return null
+  }
 }
